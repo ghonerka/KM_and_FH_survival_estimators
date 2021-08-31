@@ -1,0 +1,208 @@
+---
+title: "Kaplan-Meier and Fleming-Harrington Survival Estimators"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+
+---
+
+## Estimators
+Consider a study where where the time to an event is measured, possibly subject to right censoring and left truncation.  Let $t_1, t_2, \ldots, t_K$ be the ordered event times, and let $d_i$ and $r_i$ be the number of events that occurred and the number of subjects that were at risk at time $t_i$.  The Kaplan-Meier (KM) and Fleming-Harrington (FH) estimators of survival at time $t$ are
+\begin{align}
+\hat{S}_{KM}(t) &= \prod_{i: t_i \leq t} 1 - \frac{d_i}{r_i} \\
+\hat{S}_{FH}(t) &= \operatorname{exp} \left( - \sum_{i: t_i \leq t} \frac{d_i}{r_i} \right)
+\end{align}
+The estimators are usually similar but are not exactly the same.  The difference may be more apparent in small samples.  Note that the estimators only change at event times.  
+
+## SAB Rate
+The estimators are commonly used to estimate the rate of spontaneous abortion (SAB).  A pregnancy is considered SAB if the fetus dies or is born before the 20th week of pregnancy.  The SAB rate can be estimated as $1 - \hat{S}(20)$, where $\hat{S}(t)$ is an estimate of survival at time $t$.  Below we consider a hypothetical dataset that will be used to estimate SAB rates.  The variable `start` is the gestational age in weeks at which subjects enter the study, i.e. the left truncation time.  The variable `stop` is the earlier of the SAB time or right censoring time.  All pregnancies are censored at 20 weeks.  In this example there are 8 subjects: two experienced SAB events, one was lost to follow-up at 16.9  weeks, and five survived to 20 weeks.
+
+```{r, echo=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+
+dd <- structure(
+  list(
+    id = structure(c("1", "2", "3", "4", "5", "6", "7", "8")),
+    start = c(4.5, 5, 7.6, 9, 10.1, 13.8, 16.4, 18.8),
+    stop = c(12.9, 5.9, 20, 20, 16.9, 20, 20, 20), 
+    Outcome = structure(c(2L, 2L, 1L, 1L, 1L, 1L, 1L, 1L), .Label = c("Censored", "SAB"), class = "factor")), 
+  class = "data.frame", 
+  row.names = c(NA, -8L))
+
+dd
+
+ggplot(data = dd, mapping = aes(x = stop, y = id)) +
+  geom_segment(mapping = aes(x = start, y = id, xend = stop, yend = id)) +
+  geom_point(mapping = aes(shape = Outcome)) +
+  scale_shape_manual(values = c(1, 8)) +
+  xlab("weeks") +
+  coord_cartesian(xlim = c(0, 20))
+```
+
+## Estimates of SAB Rate
+
+There are only two SAB events, at times 5.9 and 12.9.  We compute survival and one minus survival using both estimators.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(knitr)
+library(kableExtra)
+surv <- data.frame(x = c(4.5, 5.9, 12.9)) %>% 
+  mutate(
+    di = c(0, 1, 1),
+    ri = c(1, 2, 4),
+    di_ri = c(0, 0.5, 0.25),
+    om_di_ri = 1 - di_ri,
+    KM = cumprod(om_di_ri),
+    FH = exp(-cumsum(di_ri)),
+    om_KM = 1 - KM,
+    om_FH = 1 - FH
+  ) %>% 
+  mutate(across(.cols = c(KM, FH, om_KM, om_FH), .fns = ~ paste(formatC(x = 100*.x, digits = 1, format = "f"), "%", sep = "")))
+names(surv) <- c("$t$", "$d_i$", "$r_i$", "$d_i / r_i$", "$1 - d_i/r_i$", "Survival (KM)", "Survival (FH)", "SAB Rate (KM)", "SAB Rate (FH)")
+kable(surv, "html") %>% 
+  kable_styling(full_width = FALSE)
+
+dum <- data.frame(Weeks = c(4.5, 5.9, 12.9, 20)) %>% 
+  mutate(
+    di = c(0, 1, 1, 0),
+    ri = c(1, 2, 4, 6),
+    di_ri = c(0, 0.5, 0.25, 0), # coded by hand to treat 0/0 = 1
+    om_di_ri = 1 - di_ri,
+    KM = cumprod(om_di_ri),
+    FH = exp(-cumsum(di_ri))
+  ) %>% 
+  tidyr::pivot_longer(cols = c(KM, FH), names_to = "Estimator", values_to = "Survival")
+
+ggplot(data = dum, mapping = aes(x = Weeks, y = Survival, color = Estimator)) +
+  geom_step(position = position_dodge(width = 0.075)) +
+  # geom_point(shape = 1) +
+  coord_cartesian(xlim = c(0, 20), ylim = c(0, 1))
+```
+
+## Kaplan-Meier or Fleming-Harrington?
+
+The Kaplan-Meier estimator is the most popular and widely known method for estimating survival.  Indeed, the original report by Kaplan and Meier is the most-cited statistics publication in the scientific literature.  The Flemming-Harrington method is well-known within the field of biostatitics, but it not nearly as widely used as KM.  How to choose between them?  The two methods usually yield very similar results, especially with larger sample sizes.  However, when the data are left-truncated as well as right-censored, there is one situation in which the Fleming-Harrington method offers an advantage.  Consider the situation where at some time there is a single subject at risk who experiences the event.  In our notation, this means that for some $m \in \{1, 2, \ldots, K \}$ we have $d_m = r_m = 1$.  Then for any time $t \geq t_m$, $\hat{S}_{KM}(t) = 0$: 
+
+\begin{align}
+\hat{S}_{KM}(t) &= \prod_{i: t_i \leq t} 1 - \frac{d_i}{r_i} \\
+&= \left( \prod_{i: t_i < t_m} 1 - \frac{d_i}{r_i} \right) \left( 1 - \frac{d_m}{r_m} \right) \left( \prod_{j: t_m < t_j \leq t} 1 - \frac{d_j}{r_j} \right)\\
+&= \left( \prod_{i: t_i < t_m} 1 - \frac{d_i}{r_i} \right) \left( 1 - \frac{1}{1} \right) \left( \prod_{j: t_m < t_j \leq t} 1 - \frac{d_j}{r_j} \right)\\
+&= 0. \\
+\end{align}
+
+I.e.\ the estimate drops to zero whenever there is an isolated event, even if there are subjects at risk at later time points.  The issue can be especially problematic when a subject experiences the event at an early time, before the rest of the subjects have entered the study, causing the Kaplan-Meier estimator to ignore the rest of the data.  On the other hand, it is clear from the definition that the Fleming-Harrington estimator is always positive, thus avoiding the issue caused by isolated events.  Isolated events may be more common when the sample is small.
+
+As an example, we can add an isolated event to the Aubagio data, where a new subject enters the study at $t = 1$ and experiences the event at time $t = 3$:
+
+```{r, echo=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+
+# Modify the data so that there is an isolated event at an early time
+iso_event <- data.frame(id = "new subject", start = 1, stop = 3, Outcome = "SAB")
+dd_mod <- bind_rows(iso_event, dd) %>% 
+  arrange(start, stop) %>% 
+  mutate(id = factor(id, levels = id))
+
+dd_mod
+
+ggplot(data = dd_mod, mapping = aes(x = stop, y = id)) +
+  geom_segment(mapping = aes(x = start, y = id, xend = stop, yend = id)) +
+  geom_point(mapping = aes(shape = Outcome)) +
+  scale_shape_manual(values = c(1, 8)) +
+  xlab("weeks") +
+  coord_cartesian(xlim = c(0, 20))
+```
+
+We see that the Kaplan-Meier estimator drops to zero at the isolated event, ignoring the subsequent data, while the Fleming-Harington estimator does not.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+surv_mod <- data.frame(x = c(1, 3, 5.9, 12.9)) %>% 
+  mutate(
+    di = c(0, 1, 1, 1),
+    ri = c(1, 1, 2, 4),
+    di_ri = c(0, 1, 0.5, 0.25),
+    om_di_ri = 1 - di_ri,
+    KM = cumprod(om_di_ri),
+    FH = exp(-cumsum(di_ri)),
+    om_KM = 1 - KM,
+    om_FH = 1 - FH
+  ) %>% 
+  mutate(across(.cols = c(KM, FH, om_KM, om_FH), .fns = ~ paste(formatC(x = 100*.x, digits = 1, format = "f"), "%", sep = "")))
+names(surv_mod) <- c("$t$", "$d_i$", "$r_i$", "$d_i / r_i$", "$1 - d_i/r_i$", "Survival (KM)", "Survival (FH)", "SAB Rate (KM)", "SAB Rate (FH)")
+
+kable(surv_mod, "html") %>% 
+  kable_styling(full_width = FALSE)
+
+dum_mod <- data.frame(Weeks = c(1, 3, 5.9, 12.9, 20)) %>% 
+  mutate(
+    di = c(0, 1, 1, 1, 0),
+    ri = c(1, 1, 2, 4, 6),
+    di_ri = c(0, 1, 0.5, 0.25, 0), # coded by hand to treat 0/0 = 1
+    om_di_ri = 1 - di_ri,
+    KM = cumprod(om_di_ri),
+    FH = exp(-cumsum(di_ri))
+  ) %>% 
+  tidyr::pivot_longer(cols = c(KM, FH), names_to = "Estimator", values_to = "Survival")
+
+ggplot(data = dum_mod, mapping = aes(x = Weeks, y = Survival, color = Estimator)) +
+  geom_step(position = position_dodge(width = 0.075)) +
+  # geom_point(shape = 1) +
+  coord_cartesian(xlim = c(0, 20), ylim = c(0, 1))
+```
+
+## The Crude Estimate
+
+The crude estimate of the SAB (or PTD) rate is the proportion of subjects that experienced the event during the study.  For example, if $n = 10$ and two SAB's were observed, then the crude SAB rate is $R_{crude} = 2/10 = 0.8$ or 80%.  However, women who experienced SAB at an early time may never enter the study, and enrolled subjects may be lossed to follow-up before the event can be observed.  In other words, the sample may be biased due to left truncation and right censoring.  This is the reason for using survival methods instead of the crude rate.  The KM and FH estimates of the SAB rate are $R_{KM} = 1 - \hat{S}_{KM}(20)$ and $R_{FH} = 1 - \hat{S}_{FH}(20)$.  How do they compare to the crude rate?
+
+### KM vs Crude
+
+Suppose $K$ events are observed at times $t_1, t_2, \ldots, t_K$ among $n$ subjects.  The crude SAB rate is $R_{crude} = K/n$.  Assuming there are no tied event times, we have $d_i = 1$ for all events, and the SAB rate $R_{KM}$ estimated by the KM method is:
+\begin{align}
+R_{KM} &= 1 - \hat{S}_{KM}(20) \\
+&= 1 - \prod_{i = 1}^K 1 - \frac{1}{r_i}.\\
+\end{align}
+We see that the SAB rate is determined by the number of subjects $r_i$ at risk at the event times.  This rate will be minimized when the terms in the product are as large as possible, i.e.\ when the $r_i$'s are as large as possible.  Specifically, this occurs when $r_1 = n, r_2 = n - 1, \ldots, r_K = n - K + 1$, i.e.\ when $r_i = n - i + 1$.  Then
+\begin{align}
+R_{KM} &\geq 1 - \prod_{i = 1}^K 1 - \frac{1}{n-i+1} \\
+&= 1 - \prod_{i = 1}^K \frac{n-i}{n-i+1} \\
+&= 1 - \left( \frac{n-1}{n} \right) \left( \frac{n-2}{n-1} \right) \cdots \left( \frac{n-K}{n-K-1} \right) \\
+&= 1 - \frac{n-K}{n} \\
+&= \frac{K}{n}. \\
+\end{align}
+
+Therefore, $R_{KM} \geq R_{crude}$, i.e.\ **the SAB rate based on the KM method is always greater than or equal to the crude rate.**  This makes intuitive sense: the crude rate may be biased downward because we have missed some events due to truncation and censoring; survival-based methods attempt to correct this bias.
+
+
+### FH vs Crude
+
+Since the FH method and KM method usually yield similar estimates, the SAB rate based on the FH method will usually be greater than the crude rate.  However, this relationship is not guaranteed: **in some cases it is possible for the SAB rate based on the FH method to fall below the crude rate**, i.e.\ $R_{FH} < R_{crude}$.  This is more likely to occur when most of the subjects at risk at the event times, and the effect is more pronounced for smaller samples.  For example, consider a sample with one SAB observed among $n$ subjects and suppose that all subjects are at risk at the time of the SAB.  The table below shows the SAB rate computed by the crude, KM, and FH methods.  In this case the crude and KM rates agree, while the FH rate is slightly lower.  The difference diminishes as the sample size increases.
+
+```{r, echo=FALSE, message=FALSE}
+dum <- data.frame(n = c(5, 10, 15, 20, 25, 30)) %>% 
+  mutate(
+    S_c = 1 - 1/n,
+    S_km = 1 - 1/n,
+    S_fh = exp(-1/n),
+    PTD_c = 1 - S_c,
+    PTD_km = 1 - S_km,
+    PTD_fh = 1 - S_fh
+  ) %>% 
+  mutate(across(-n, formatC, digits = 3, format = "f"))
+names(dum) <- c("n", "Suvival (Crude)", "Survival (KM)", "Survival (FH)", "SAB Rate (Crude)", "SAB Rate (KM)", "SAB Rate (FH)")
+dum %>% select(n, `SAB Rate (Crude)`, `SAB Rate (KM)`, `SAB Rate (FH)`)
+```
+
+
+
+
+
+
+
+
+

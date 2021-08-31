@@ -1,0 +1,13 @@
+# Python
+__pycache__
+
+# Python: Jupyter Notebooks
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# R
+.Rhistory
+
+# R: R Notebooks
+.Rproj.user
+*/.Rproj.user/*
